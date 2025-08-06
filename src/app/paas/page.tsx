@@ -23,6 +23,9 @@ export default function PaaSPage() {
   // Difyの入力フィールド
   const [receptionNumberInput, setReceptionNumberInput] = useState('');
   const [classificationInput, setClassificationInput] = useState('');
+  
+  // 会話状態管理
+  const [isChatActive, setIsChatActive] = useState(false);
 
   // 受付情報
   const receptionInfo = {
@@ -69,6 +72,10 @@ export default function PaaSPage() {
     setShowDialog(false);
     setSelectedAction('');
   };
+
+
+
+  
 
   // Difyチャット送信
   const sendMessage = async () => {
@@ -181,8 +188,9 @@ export default function PaaSPage() {
     };
 
     // 新しい会話を開始：チャット履歴をクリアし、conversation_idをリセット
-    setChatMessages([userMessage]);
+        setChatMessages([userMessage]);
     setConversationId(null);
+    setIsChatActive(true); // チャットをアクティブ化
     setIsLoading(true);
 
     // 選択された分類を自動で設定（サニタイズ済み）
@@ -233,7 +241,7 @@ export default function PaaSPage() {
       console.error('Chat error:', error);
       const errorMessage: ChatMessage = {
         id: (Date.now() + 1).toString(),
-                  content: 'メッセージの送信に失敗しました。もう一度お試しください。',
+        content: 'メッセージの送信に失敗しました。もう一度お試しください。',
         isUser: false,
         timestamp: new Date()
       };
@@ -381,52 +389,10 @@ export default function PaaSPage() {
             </p>
           </div>
 
-          {/* Dify入力フィールドエリア */}
-          <div className="bg-blue-50 border-b p-4">
-            <h3 className="text-sm font-bold text-gray-700 mb-3">入力フィールド</h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-              {/* 受付番号 */}
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  受付番号 <span className="text-red-500">*</span>
-                </label>
-                <input
-                  type="text"
-                  value={receptionNumberInput}
-                  onChange={(e) => setReceptionNumberInput(e.target.value)}
-                  placeholder={receptionInfo.receptionNumber}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                />
-              </div>
 
-              {/* お問い合わせ分類 */}
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">
-                  お問い合わせ分類 <span className="text-red-500">*</span>
-                </label>
-                <select
-                  value={classificationInput}
-                  onChange={(e) => setClassificationInput(e.target.value)}
-                  className="w-full border border-gray-300 rounded px-3 py-2 text-sm focus:outline-none focus:border-blue-500"
-                >
-                  <option value="">選択してください</option>
-                  {classificationOptions.map((option) => (
-                    <option key={option} value={option}>
-                      {option}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            </div>
-            
-            {/* 現在の設定値表示 */}
-            <div className="mt-3 text-xs text-gray-600">
-              <p>現在の値: 受付番号「{receptionNumberInput || receptionInfo.receptionNumber}」、分類「{classificationInput || '未選択'}」</p>
-            </div>
-          </div>
 
           {/* チャットメッセージエリア */}
-          <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-4">
+          <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-4 min-h-0">
                          {chatMessages.length === 0 && (
                <div className="text-center text-gray-500 mt-8">
                  <p className="text-lg mb-2">こんにちは！</p>
@@ -459,20 +425,20 @@ export default function PaaSPage() {
               </div>
             ))}
             
-            {isLoading && (
-              <div className="flex justify-start">
-                <div className="bg-white text-gray-800 shadow-md max-w-xs lg:max-w-md px-4 py-2 rounded-lg">
-                  <div className="flex items-center space-x-2">
-                    <div className="flex space-x-1">
-                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce"></div>
-                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                      <div className="w-2 h-2 bg-gray-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                    </div>
-                                         <span className="text-sm text-gray-600">処理中...</span>
-                  </div>
-                </div>
-              </div>
-            )}
+                         {isLoading && (
+               <div className="flex justify-start">
+                 <div className="bg-white text-gray-800 shadow-md max-w-xs lg:max-w-md px-4 py-2 rounded-lg">
+                   <div className="flex items-center space-x-2">
+                     <div className="flex space-x-1">
+                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                     </div>
+                     <span className="text-sm text-gray-600">AIが応答中...</span>
+                   </div>
+                 </div>
+               </div>
+             )}
             <div ref={messagesEndRef} />
           </div>
 
@@ -484,13 +450,13 @@ export default function PaaSPage() {
                 value={inputMessage}
                 onChange={(e) => setInputMessage(e.target.value)}
                 onKeyPress={handleKeyPress}
-                placeholder="メッセージを入力してください..."
-                className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500"
-                disabled={isLoading}
+                placeholder={isChatActive ? "メッセージを入力してください..." : "左側のボタンを押して会話を開始してください"}
+                className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
+                disabled={isLoading || !isChatActive}
               />
               <button
                 onClick={sendMessage}
-                disabled={isLoading || !inputMessage.trim()}
+                disabled={isLoading || !inputMessage.trim() || !isChatActive}
                 className="bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-6 py-2 rounded-lg font-medium transition duration-200"
               >
                 送信
@@ -502,6 +468,7 @@ export default function PaaSPage() {
                 onClick={() => {
                   setChatMessages([]);
                   setConversationId(null);
+                  setIsChatActive(false);
                 }}
                 className="text-blue-600 hover:text-blue-800"
               >
