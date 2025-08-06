@@ -77,6 +77,64 @@ export default function PaaSPage() {
 
   
 
+  // SSEストリーミングレスポンス処理
+  const processStreamingResponse = async (response: Response, botMessageId: string) => {
+    const reader = response.body?.getReader();
+    if (!reader) throw new Error('No reader available');
+    const decoder = new TextDecoder('utf-8');
+    let buffer = '';
+    let done = false;
+
+    try {
+      while (!done) {
+        const { value, done: readDone } = await reader.read();
+        if (readDone) break;
+        buffer += decoder.decode(value, { stream: true });
+        let boundary;
+        // イベント区切り用のブロックごとに処理
+        while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+          const chunk = buffer.slice(0, boundary);
+          buffer = buffer.slice(boundary + 2);
+          const lines = chunk.split('\n');
+          for (const line of lines) {
+            if (line.startsWith('data: ')) {
+              const jsonStr = line.slice(6).trim();
+              if (jsonStr === '[DONE]') { done = true; break; }
+              try {
+                const data = JSON.parse(jsonStr);
+                console.log('📥 Received streaming data:', { 
+                  event: data.event, 
+                  answer_length: data.answer?.length || 0,
+                  answer_content: data.answer || ''
+                });
+
+                // メッセージ更新 - Difyから受信したanswerをそのまま追加
+                if (data.answer !== undefined && data.answer !== '') {
+                  setChatMessages(prev =>
+                    prev.map(msg =>
+                      msg.id === botMessageId
+                        ? { ...msg, content: msg.content + data.answer }
+                        : msg
+                    )
+                  );
+                }
+                // 会話ID更新
+                if (data.conversation_id) {
+                  setConversationId(data.conversation_id);
+                }
+              } catch (parseError) {
+                console.warn('JSON parse error:', parseError, 'Raw data:', jsonStr);
+              }
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+      console.log('🔚 Streaming completed');
+    }
+  };
+
   // Difyチャット送信
   const sendMessage = async () => {
     if (!inputMessage.trim() || isLoading) return;
@@ -85,62 +143,46 @@ export default function PaaSPage() {
       id: Date.now().toString(),
       content: inputMessage,
       isUser: true,
-      timestamp: new Date()
+      timestamp: new Date(),
     };
-
     setChatMessages(prev => [...prev, userMessage]);
     setInputMessage('');
     setIsLoading(true);
 
-    // Difyの入力フィールドの値を設定
-    // 分類が有効なオプションかチェック
+    // ボット用空メッセージ
+    const botMessageId = (Date.now() + 1).toString();
+    const botMessage: ChatMessage = {
+      id: botMessageId,
+      content: '',
+      isUser: false,
+      timestamp: new Date(),
+    };
+    setChatMessages(prev => [...prev, botMessage]);
+
     const validClassification = classificationOptions.includes(classificationInput) ? classificationInput : '';
-    
     const inputs = {
       reception_number: receptionNumberInput || receptionInfo.receptionNumber,
-      classification: validClassification
+      classification: validClassification,
     };
 
     try {
       const response = await fetch('/api/dify-chat', {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          message: inputMessage,
-          conversation_id: conversationId,
-          inputs: inputs
-        }),
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: inputMessage, conversation_id: conversationId, inputs }),
       });
-
-      if (!response.ok) {
-        throw new Error(`API error: ${response.status}`);
-      }
-
-      const data = await response.json();
-      
-      if (data.conversation_id && !conversationId) {
-        setConversationId(data.conversation_id);
-      }
-
-      const botMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        content: data.answer || 'エラーが発生しました',
-        isUser: false,
-        timestamp: new Date()
-      };
-
-      setChatMessages(prev => [...prev, botMessage]);
+      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      // SSEストリーム処理
+      await processStreamingResponse(response, botMessageId);
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        content: 'メッセージの送信に失敗しました。もう一度お試しください。',
+        id: botMessageId,
+        content: 'メッセージの送信に失敗しました。',
         isUser: false,
-        timestamp: new Date()
+        timestamp: new Date(),
       };
-      setChatMessages(prev => [...prev, errorMessage]);
+      setChatMessages(prev => prev.map(msg => msg.id === botMessageId ? errorMessage : msg));
     } finally {
       setIsLoading(false);
     }
@@ -188,10 +230,20 @@ export default function PaaSPage() {
     };
 
     // 新しい会話を開始：チャット履歴をクリアし、conversation_idをリセット
-        setChatMessages([userMessage]);
+    setChatMessages([userMessage]);
     setConversationId(null);
     setIsChatActive(true); // チャットをアクティブ化
     setIsLoading(true);
+
+    // ボット用空メッセージ
+    const botMessageId = (Date.now() + 1).toString();
+    const botMessage: ChatMessage = {
+      id: botMessageId,
+      content: '',
+      isUser: false,
+      timestamp: new Date(),
+    };
+    setChatMessages(prev => [...prev, botMessage]);
 
     // 選択された分類を自動で設定（サニタイズ済み）
     const sanitizedClassification = classificationValue
@@ -222,30 +274,17 @@ export default function PaaSPage() {
         throw new Error(`API error: ${response.status}`);
       }
 
-      const data = await response.json();
-      
-      // ボタンからの会話開始時は新しいconversation_idを保存
-      if (data.conversation_id) {
-        setConversationId(data.conversation_id);
-      }
-
-      const botMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
-        content: data.answer || 'エラーが発生しました',
-        isUser: false,
-        timestamp: new Date()
-      };
-
-      setChatMessages(prev => [...prev, botMessage]);
+      // SSEストリーム処理
+      await processStreamingResponse(response, botMessageId);
     } catch (error) {
       console.error('Chat error:', error);
       const errorMessage: ChatMessage = {
-        id: (Date.now() + 1).toString(),
+        id: botMessageId,
         content: 'メッセージの送信に失敗しました。もう一度お試しください。',
         isUser: false,
         timestamp: new Date()
       };
-      setChatMessages(prev => [...prev, errorMessage]);
+      setChatMessages(prev => prev.map(msg => msg.id === botMessageId ? errorMessage : msg));
     } finally {
       setIsLoading(false);
     }

@@ -51,10 +51,10 @@ export async function POST(request: NextRequest) {
     // メッセージとinputsをサニタイズ
     const sanitizedMessage = sanitizeMessage(message);
     const sanitizedInputs = sanitizeInputs(inputs);
-    console.log('📤 Sending to Dify:', sanitizedMessage);
+    console.log('📤 Sending to Dify (streaming):', sanitizedMessage);
     console.log('📝 Sanitized Inputs:', JSON.stringify(sanitizedInputs, null, 2));
 
-    // Dify Chat Messages API 呼び出し
+    // Dify Chat Messages API 呼び出し（ストリーミングモード）
     const difyResponse = await fetch(`${difyBaseUrl}/chat-messages`, {
       method: 'POST',
       headers: {
@@ -64,7 +64,7 @@ export async function POST(request: NextRequest) {
       body: JSON.stringify({
         inputs: sanitizedInputs || {},
         query: sanitizedMessage,
-        response_mode: 'blocking',
+        response_mode: 'streaming',
         conversation_id: conversation_id || undefined,
         user: 'transcribe-user'
       }),
@@ -79,14 +79,83 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    const difyResult = await difyResponse.json();
-    console.log('📥 Dify response received:', difyResult.answer?.substring(0, 100) + '...');
+    // SSEレスポンスを返す
+    const readable = new ReadableStream({
+      start(controller) {
+        const reader = difyResponse.body?.getReader();
+        if (!reader) {
+          console.error('❌ No reader available from Dify response');
+          controller.close();
+          return;
+        }
 
-    return Response.json({
-      answer: difyResult.answer,
-      conversation_id: difyResult.conversation_id,
-      message_id: difyResult.message_id,
-      usage: difyResult.metadata?.usage,
+        const decoder = new TextDecoder('utf-8');
+        let buffer = '';
+
+        function pump(): Promise<void> {
+          return reader!.read().then(({ done, value }) => {
+            if (done) {
+              console.log('🔚 Dify streaming completed');
+              controller.close();
+              return;
+            }
+
+            const chunk = decoder.decode(value, { stream: true });
+            buffer += chunk;
+
+            // イベント区切りで処理
+            let boundary;
+            while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+              const event = buffer.slice(0, boundary);
+              buffer = buffer.slice(boundary + 2);
+
+              if (event.trim()) {
+                console.log('📥 Raw Dify data:', event);
+                
+                // data行を解析
+                const lines = event.split('\n');
+                for (const line of lines) {
+                  if (line.startsWith('data: ')) {
+                    const jsonStr = line.slice(6).trim();
+                    if (jsonStr !== '[DONE]') {
+                      try {
+                        const data = JSON.parse(jsonStr);
+                        console.log('📊 Parsed Dify data:', {
+                          event: data.event,
+                          answer_length: data.answer?.length || 0,
+                          answer_sample: data.answer?.substring(0, 100) || '',
+                          conversation_id: data.conversation_id,
+                          message_id: data.message_id
+                        });
+                      } catch (parseError) {
+                        console.warn('⚠️ JSON parse error:', parseError, 'Data:', jsonStr);
+                      }
+                    }
+                  }
+                }
+              }
+
+              // クライアントに転送
+              controller.enqueue(new TextEncoder().encode(event + '\n\n'));
+            }
+
+            return pump();
+          });
+        }
+
+        return pump().catch(error => {
+          console.error('❌ Streaming error:', error);
+          controller.error(error);
+        });
+      }
+    });
+
+    return new Response(readable, {
+      headers: {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+      },
     });
     
   } catch (error) {
