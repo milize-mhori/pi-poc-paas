@@ -43,6 +43,20 @@ export default function Home() {
           </div>
         </div>
 
+        {/* デモページへのリンク */}
+        <div className="bg-gradient-to-r from-blue-50 to-indigo-50 rounded-lg shadow-lg p-6 mb-8">
+          <h2 className="text-2xl font-bold text-gray-800 mb-4 text-center">🔗 デモページ</h2>
+          <div className="flex justify-center">
+            <a 
+              href="/paas" 
+              className="bg-gradient-to-r from-blue-500 to-blue-600 hover:from-blue-600 hover:to-blue-700 text-white font-bold py-4 px-8 rounded-lg shadow-lg transform transition duration-200 hover:scale-105 active:scale-95 text-center"
+            >
+              📱 PaaS通話システム
+              <div className="text-sm opacity-90 mt-1">オペレータ発信デモ</div>
+            </a>
+          </div>
+        </div>
+
         {/* メインコンポーネント */}
         <StreamingVoiceRecorder />
 

@@ -26,6 +26,7 @@ export async function GET(request: NextRequest) {
     const sessionId = url.searchParams.get('sessionId') || crypto.randomUUID();
     const voiceId = url.searchParams.get('voiceId') || 'Takumi';
     const autoTTS = url.searchParams.get('autoTTS') !== 'false';
+    const vocabularyName = url.searchParams.get('vocabularyName') || process.env.AWS_TRANSCRIBE_VOCABULARY_NAME || 'roadservice';
     
     let streamController: ReadableStreamDefaultController | null = null;
     
@@ -53,7 +54,7 @@ export async function GET(request: NextRequest) {
         });
         
         // AWS Transcribe ストリーミング開始
-        startTranscribeStream(sessionId, voiceId, autoTTS);
+        startTranscribeStream(sessionId, voiceId, autoTTS, vocabularyName);
         
         // 接続確認メッセージ
         const encoder = new TextEncoder();
@@ -139,14 +140,15 @@ export async function POST(request: NextRequest) {
 }
 
 // AWS Transcribe ストリーミング開始
-async function startTranscribeStream(sessionId: string, voiceId: string, autoTTS: boolean) {
+async function startTranscribeStream(sessionId: string, voiceId: string, autoTTS: boolean, vocabularyName?: string) {
   const session = activeSessions.get(sessionId);
   if (!session) return;
   
   try {
     console.log('🚀 Starting AWS Transcribe stream for session:', sessionId);
     
-    const command = new StartStreamTranscriptionCommand({
+    // StartStreamTranscriptionCommandのパラメータを構築
+    const commandParams: any = {
       LanguageCode: "ja-JP",
       MediaEncoding: "pcm",
       MediaSampleRateHertz: 16000,
@@ -156,7 +158,15 @@ async function startTranscribeStream(sessionId: string, voiceId: string, autoTTS
           yield { AudioEvent: { AudioChunk: chunk } };
         }
       })(),
-    });
+    };
+
+    // カスタムボキャブラリーが指定されている場合は追加
+    if (vocabularyName) {
+      commandParams.VocabularyName = vocabularyName;
+      console.log(`🔤 Using custom vocabulary: ${vocabularyName}`);
+    }
+
+    const command = new StartStreamTranscriptionCommand(commandParams);
 
     const response = await session.transcribeClient.send(command);
     console.log('📨 Transcribe stream established');

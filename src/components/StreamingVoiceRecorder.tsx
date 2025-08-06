@@ -38,6 +38,7 @@ export default function StreamingVoiceRecorder() {
   // 設定
   const [autoTTS, setAutoTTS] = useState(true);
   const [selectedVoice, setSelectedVoice] = useState("Takumi");
+  const [vocabularyName, setVocabularyName] = useState("roadservice");
   
   // 音声再生関連
   const [isPlaying, setIsPlaying] = useState(false);
@@ -64,6 +65,9 @@ export default function StreamingVoiceRecorder() {
     url.searchParams.set('sessionId', newSessionId);
     url.searchParams.set('voiceId', selectedVoice);
     url.searchParams.set('autoTTS', autoTTS.toString());
+    if (vocabularyName) {
+      url.searchParams.set('vocabularyName', vocabularyName);
+    }
     
     eventSourceRef.current = new EventSource(url.toString());
     
@@ -422,6 +426,17 @@ export default function StreamingVoiceRecorder() {
                 <option value="Takumi">Takumi（男性）</option>
                 <option value="Mizuki">Mizuki（女性）</option>
               </select>
+            </div>
+            <div className="flex items-center gap-2">
+              <label className="text-sm text-gray-600">カスタムボキャブラリー:</label>
+              <input
+                type="text"
+                value={vocabularyName}
+                onChange={(e) => setVocabularyName(e.target.value)}
+                className="px-3 py-1 border rounded text-sm"
+                placeholder="roadservice"
+                disabled={isRecording || isConnected}
+              />
             </div>
           </div>
         </div>
