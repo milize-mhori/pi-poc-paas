@@ -6,7 +6,7 @@ function sanitizeMessage(text: string): string {
   return text
     .replace(/[\uD800-\uDFFF]/g, '') // サロゲートペア文字を除去
     .replace(/[^\u0000-\uFFFF]/g, '') // BMP外の文字を除去
-    .replace(/🚫|⚠️|🔄|💰|🏍️|📞|🤖|📱|🟢|❌|📝|👋|📤|📥/g, '') // 特定の絵文字を除去
+    .replace(/🚫|🔄|💰|📞|🤖|📱|🟢|❌|📝|👋|📤|📥/g, '') // 特定の絵文字を除去（⚠️と🏍️を除外）
     .trim();
 }
 
@@ -17,9 +17,35 @@ function sanitizeInputs(inputs: any): any {
   }
   
   const sanitizedInputs: any = {};
+  
+  // Difyが期待する分類値のリスト
+  const validClassifications = [
+    'お客様不在',
+    '作業不可', 
+    '作業変更',
+    '料金相談',
+    '二輪脱輪作業前',
+    'お客様連絡不可'
+  ];
+  
   for (const [key, value] of Object.entries(inputs)) {
     if (typeof value === 'string') {
-      sanitizedInputs[key] = sanitizeMessage(value);
+      let sanitizedValue = sanitizeMessage(value);
+      
+      // classificationフィールドの場合、有効な値かチェック
+      if (key === 'classification' && sanitizedValue) {
+        // 完全一致する有効な分類を探す
+        const matchedClassification = validClassifications.find(valid => valid === sanitizedValue);
+        if (matchedClassification) {
+          sanitizedInputs[key] = matchedClassification;
+        } else {
+          console.warn(`⚠️ Invalid classification: "${sanitizedValue}", expected one of:`, validClassifications);
+          // 空文字列にして無効な値を送信しないようにする
+          sanitizedInputs[key] = '';
+        }
+      } else {
+        sanitizedInputs[key] = sanitizedValue;
+      }
     } else {
       sanitizedInputs[key] = value;
     }
@@ -73,8 +99,20 @@ export async function POST(request: NextRequest) {
     if (!difyResponse.ok) {
       const errorText = await difyResponse.text();
       console.error('❌ Dify API error:', difyResponse.status, errorText);
+      
+      // エラーの詳細情報をログに出力
+      console.error('❌ Request details:', {
+        message: sanitizedMessage,
+        inputs: sanitizedInputs,
+        conversation_id: conversation_id
+      });
+      
       return Response.json(
-        { error: `Dify API error: ${difyResponse.status}` },
+        { 
+          error: `Dify API error: ${difyResponse.status}`,
+          details: errorText,
+          sanitizedMessage: sanitizedMessage.substring(0, 100) // デバッグ用に最初の100文字のみ
+        },
         { status: difyResponse.status }
       );
     }

@@ -1,12 +1,19 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import ReceptionNumberSelector from '@/components/ReceptionNumberSelector';
 
 interface ChatMessage {
   id: string;
   content: string;
   isUser: boolean;
   timestamp: Date;
+}
+
+interface PaaSData {
+  receptionNumber: string;
+  troubleContent: string;
+  arrangementType: string;
 }
 
 export default function PaaSPage() {
@@ -27,12 +34,26 @@ export default function PaaSPage() {
   // 会話状態管理
   const [isChatActive, setIsChatActive] = useState(false);
 
-  // 受付情報
-  const receptionInfo = {
+  // 受付情報 - 新しいセレクター用
+  const [selectedReception, setSelectedReception] = useState<PaaSData | null>({
     receptionNumber: 'SO-2503-30012',
     troubleContent: 'バッテリー',
-    arrangementType: 'レッカー'
+    arrangementType: 'ジャンピング'
+  });
+
+  // 後方互換性のための受付情報
+  const receptionInfo = selectedReception || {
+    receptionNumber: 'SO-2503-30012',
+    troubleContent: 'バッテリー',
+    arrangementType: 'ジャンピング'
   };
+
+  // 受付番号が変更されたときにDifyの入力フィールドも更新
+  useEffect(() => {
+    if (selectedReception) {
+      setReceptionNumberInput(selectedReception.receptionNumber);
+    }
+  }, [selectedReception]);
 
   // オペレータ発信ボタンの種類
   const operatorButtons = [
@@ -208,15 +229,17 @@ export default function PaaSPage() {
 
   // オペレータ発信でチャットに自動メッセージ送信
   const handleOperatorCall = async (action: string) => {
-    // より厳密に絵文字と余分な文字を除去
+    // 絵文字とスペースを完全に除去
     const cleanAction = action
-      .replace(/^[🚫⚠️🔄💰🏍️📞]\s*/, '') // 先頭の絵文字とスペースを除去
+      .replace(/[🚫⚠️🔄💰🏍️📞]/g, '') // 絵文字を除去
       .replace(/[\uD800-\uDFFF]/g, '') // サロゲートペア文字を除去
-      .trim();
+      .replace(/\uFE0F/g, '') // バリエーションセレクタを除去
+      .trim(); // 前後のスペースを除去
     
     // 分類マッピングから正確な値を取得
     const classificationValue = buttonToClassificationMap[cleanAction] || cleanAction;
     
+    // メッセージ作成時に絵文字を含めない（APIエラーを防ぐため）
     const message = `受付番号：${receptionNumberInput || receptionInfo.receptionNumber}、分類：${classificationValue}`;
     
     // 表示用メッセージ（絵文字あり）
@@ -245,10 +268,13 @@ export default function PaaSPage() {
     };
     setChatMessages(prev => [...prev, botMessage]);
 
-    // 選択された分類を自動で設定（サニタイズ済み）
+    // 選択された分類を完全にサニタイズ
     const sanitizedClassification = classificationValue
+      .replace(/[🚫⚠️🔄💰🏍️📞]/g, '') // 絵文字を除去
       .replace(/[\uD800-\uDFFF]/g, '') // サロゲートペア文字を除去
-      .trim();
+      .replace(/\uFE0F/g, '') // バリエーションセレクタを除去
+      .trim(); // 前後のスペースを除去
+    
     setClassificationInput(sanitizedClassification);
 
     // Difyの入力フィールドの値を設定
@@ -257,6 +283,14 @@ export default function PaaSPage() {
       classification: sanitizedClassification
     };
 
+    console.log('🔍 Debug classification:', {
+      original: action,
+      cleaned: cleanAction,
+      mapped: classificationValue,
+      sanitized: sanitizedClassification,
+      inputs: inputs
+    });
+
     try {
       const response = await fetch('/api/dify-chat', {
         method: 'POST',
@@ -264,7 +298,7 @@ export default function PaaSPage() {
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({
-          message: message,
+          message: message, // 絵文字を含まないクリーンなメッセージをAPIに送信
           conversation_id: null, // ボタンからは新しい会話として送信
           inputs: inputs
         }),
@@ -305,22 +339,29 @@ export default function PaaSPage() {
                 📱 オペレータ通話システム
               </h1>
               
-              {/* 受付情報 */}
-              <div className="space-y-2">
-                <div className="flex justify-between items-center border-b pb-1">
-                  <span className="text-gray-600 text-sm font-medium">受付番号:</span>
-                  <span className="text-blue-600 font-bold text-sm">{receptionInfo.receptionNumber}</span>
+              {/* 受付番号セレクター */}
+              <div className="space-y-3">
+                <div>
+                  <label className="text-gray-600 text-sm font-medium block mb-1">受付番号:</label>
+                  <ReceptionNumberSelector
+                    selectedReception={selectedReception}
+                    onSelectionChange={setSelectedReception}
+                  />
                 </div>
                 
-                <div className="flex justify-between items-center border-b pb-1">
-                  <span className="text-gray-600 text-sm font-medium">トラブル内容:</span>
-                  <span className="text-red-600 font-bold text-sm">{receptionInfo.troubleContent}</span>
-                </div>
-                
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-600 text-sm font-medium">手配区分:</span>
-                  <span className="text-green-600 font-bold text-sm">{receptionInfo.arrangementType}</span>
-                </div>
+                {selectedReception && (
+                  <>
+                    <div className="flex justify-between items-center border-b pb-1">
+                      <span className="text-gray-600 text-sm font-medium">トラブル内容:</span>
+                      <span className="text-red-600 font-bold text-sm">{selectedReception.troubleContent}</span>
+                    </div>
+                    
+                    <div className="flex justify-between items-center">
+                      <span className="text-gray-600 text-sm font-medium">手配区分:</span>
+                      <span className="text-green-600 font-bold text-sm">{selectedReception.arrangementType}</span>
+                    </div>
+                  </>
+                )}
               </div>
             </div>
 
@@ -343,83 +384,77 @@ export default function PaaSPage() {
               </div>
             </div>
 
-            {/* 緊急連絡先 */}
-            <div className="bg-red-50 border border-red-200 rounded-lg p-3 mt-4">
-              <h3 className="text-red-700 font-bold mb-1 text-sm">🚨 緊急時連絡先</h3>
-              <p className="text-red-600 text-xs">
-                緊急時は直接お電話ください: <span className="font-bold">0120-XXX-XXX</span>
-              </p>
+
+
+            {/* フッター */}
+            <div className="text-center mt-4 text-gray-500 text-xs">
+              <p>PaaS Demo System v1.0</p>
+              <p>© 2024 Road Service Platform</p>
             </div>
+          </div>
 
-                         {/* フッター */}
-             <div className="text-center mt-4 text-gray-500 text-xs">
-               <p>PaaS Demo System v1.0</p>
-               <p>© 2024 Road Service Platform</p>
-             </div>
-           </div>
-
-           {/* スマホ画面内モーダル */}
-           {showDialog && (
-             <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 rounded-3xl">
-               <div className="bg-white rounded-lg shadow-xl w-full max-w-xs p-4">
-                 <h3 className="text-base font-bold text-gray-800 mb-3 text-center">
-                   発信確認
-                 </h3>
-                 
-                 <div className="text-center mb-4">
-                   <p className="text-gray-600 mb-3 text-sm">以下の件でAIアシスタントに問い合わせします：</p>
-                   
-                   {/* 受付情報 */}
-                   <div className="bg-gray-50 rounded-lg p-3 mb-3 text-left">
-                     <div className="space-y-1">
-                       <div className="flex justify-between items-center">
-                         <span className="text-gray-600 text-xs">受付番号:</span>
-                         <span className="text-blue-600 font-bold text-xs">{receptionInfo.receptionNumber}</span>
-                       </div>
-                       <div className="flex justify-between items-center">
-                         <span className="text-gray-600 text-xs">トラブル内容:</span>
-                         <span className="text-red-600 font-bold text-xs">{receptionInfo.troubleContent}</span>
-                       </div>
-                       <div className="flex justify-between items-center">
-                         <span className="text-gray-600 text-xs">手配区分:</span>
-                         <span className="text-green-600 font-bold text-xs">{receptionInfo.arrangementType}</span>
-                       </div>
-                     </div>
-                   </div>
-                   
-                   {/* 発信理由 */}
-                   <div className="bg-blue-50 rounded-lg p-2">
-                     <p className="text-blue-800 font-bold text-sm">{selectedAction}</p>
-                   </div>
-                 </div>
-                 
-                 <div className="flex space-x-2">
-                                        <button
-                       onClick={() => handleOperatorCall(selectedAction)}
-                       className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-3 rounded-lg transition duration-200 text-sm"
-                       disabled={isLoading}
-                     >
-                       問い合わせ
-                     </button>
-                     
-                     <button
-                       onClick={closeDialog}
-                       className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-3 rounded-lg transition duration-200 text-sm"
-                     >
-                       キャンセル
-                     </button>
-                 </div>
-               </div>
-             </div>
-           )}
-         </div>
-       </div>
+          {/* スマホ画面内モーダル */}
+          {showDialog && (
+            <div className="absolute inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 rounded-3xl">
+              <div className="bg-white rounded-lg shadow-xl w-full max-w-xs p-4">
+                <h3 className="text-base font-bold text-gray-800 mb-3 text-center">
+                  発信確認
+                </h3>
+                
+                <div className="text-center mb-4">
+                  <p className="text-gray-600 mb-3 text-sm">以下の件でAIアシスタントに問い合わせします：</p>
+                  
+                  {/* 受付情報 */}
+                  <div className="bg-gray-50 rounded-lg p-3 mb-3 text-left">
+                    <div className="space-y-1">
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 text-xs">受付番号:</span>
+                        <span className="text-blue-600 font-bold text-xs">{receptionInfo.receptionNumber}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 text-xs">トラブル内容:</span>
+                        <span className="text-red-600 font-bold text-xs">{receptionInfo.troubleContent}</span>
+                      </div>
+                      <div className="flex justify-between items-center">
+                        <span className="text-gray-600 text-xs">手配区分:</span>
+                        <span className="text-green-600 font-bold text-xs">{receptionInfo.arrangementType}</span>
+                      </div>
+                    </div>
+                  </div>
+                  
+                  {/* 発信理由 */}
+                  <div className="bg-blue-50 rounded-lg p-2">
+                    <p className="text-blue-800 font-bold text-sm">{selectedAction}</p>
+                  </div>
+                </div>
+                
+                <div className="flex space-x-2">
+                  <button
+                    onClick={() => handleOperatorCall(selectedAction)}
+                    className="flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 px-3 rounded-lg transition duration-200 text-sm"
+                    disabled={isLoading}
+                  >
+                    問い合わせ
+                  </button>
+                  
+                  <button
+                    onClick={closeDialog}
+                    className="flex-1 bg-gray-500 hover:bg-gray-600 text-white font-bold py-2 px-3 rounded-lg transition duration-200 text-sm"
+                  >
+                    キャンセル
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+      </div>
 
       {/* 右側：チャットエリア */}
       <div className="w-full lg:w-1/2 p-4 bg-white">
-        <div className="h-full min-h-[600px] lg:min-h-0 flex flex-col">
+        <div className="h-full max-h-screen flex flex-col">
           {/* チャットヘッダー */}
-          <div className="bg-blue-600 text-white p-4 rounded-t-lg">
+          <div className="bg-blue-600 text-white p-4 rounded-t-lg flex-shrink-0">
             <h2 className="text-xl font-bold flex items-center">
               Dify AI アシスタント
             </h2>
@@ -428,18 +463,8 @@ export default function PaaSPage() {
             </p>
           </div>
 
-
-
           {/* チャットメッセージエリア */}
           <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-4 min-h-0">
-                         {chatMessages.length === 0 && (
-               <div className="text-center text-gray-500 mt-8">
-                 <p className="text-lg mb-2">こんにちは！</p>
-                 <p>ロードサービスの対応についてお気軽にお尋ねください。</p>
-                 <p className="text-sm mt-2">左側のボタンを押すか、直接メッセージを入力してください。</p>
-               </div>
-             )}
-            
             {chatMessages.map((message) => (
               <div
                 key={message.id}
@@ -464,25 +489,25 @@ export default function PaaSPage() {
               </div>
             ))}
             
-                         {isLoading && (
-               <div className="flex justify-start">
-                 <div className="bg-white text-gray-800 shadow-md max-w-xs lg:max-w-md px-4 py-2 rounded-lg">
-                   <div className="flex items-center space-x-2">
-                     <div className="flex space-x-1">
-                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
-                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
-                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
-                     </div>
-                     <span className="text-sm text-gray-600">AIが応答中...</span>
-                   </div>
-                 </div>
-               </div>
-             )}
+            {isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-white text-gray-800 shadow-md max-w-xs lg:max-w-md px-4 py-2 rounded-lg">
+                  <div className="flex items-center space-x-2">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce"></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.1s' }}></div>
+                      <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
+                    </div>
+                    <span className="text-sm text-gray-600">AIが応答中...</span>
+                  </div>
+                </div>
+              </div>
+            )}
             <div ref={messagesEndRef} />
           </div>
 
           {/* チャット入力エリア */}
-          <div className="border-t bg-white p-4">
+          <div className="border-t bg-white p-4 flex-shrink-0">
             <div className="flex space-x-2 mb-2">
               <input
                 type="text"
@@ -517,8 +542,6 @@ export default function PaaSPage() {
           </div>
         </div>
       </div>
-
-
     </div>
   );
 } 
