@@ -34,6 +34,19 @@ export default function PaaSPage() {
   // 会話状態管理
   const [isChatActive, setIsChatActive] = useState(false);
 
+  // TTS関連のstate
+  const [isTTSEnabled, setIsTTSEnabled] = useState(true); // 自動読み上げのON/OFF
+  const [isSpeaking, setIsSpeaking] = useState(false); // 現在読み上げ中かどうか
+  const [speechInstance, setSpeechInstance] = useState<SpeechSynthesis | null>(null);
+  const [showTTSSettings, setShowTTSSettings] = useState(false); // 設定パネルの表示状態
+  
+  // TTS設定パラメータ
+  const [ttsSettings, setTtsSettings] = useState({
+    rate: 3.5,    // 読み上げ速度 (0.1 - 5) デフォルトを3.5倍速に
+    pitch: 1.0,   // 音の高さ (0 - 2)
+    volume: 0.8   // 音量 (0 - 1)
+  });
+
   // 受付情報 - 新しいセレクター用
   const [selectedReception, setSelectedReception] = useState<PaaSData | null>({
     receptionNumber: 'SO-2503-30012',
@@ -54,6 +67,61 @@ export default function PaaSPage() {
       setReceptionNumberInput(selectedReception.receptionNumber);
     }
   }, [selectedReception]);
+
+  // TTS初期化
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'speechSynthesis' in window) {
+      setSpeechInstance(window.speechSynthesis);
+    }
+  }, []);
+
+  // TTS機能：テキストを音声で読み上げ
+  const speakText = (text: string) => {
+    if (!speechInstance || !text.trim()) return;
+
+    // 既に読み上げ中の場合は停止
+    speechInstance.cancel();
+
+    const utterance = new SpeechSynthesisUtterance(text);
+    
+    // 日本語設定と動的パラメータ
+    utterance.lang = 'ja-JP';
+    utterance.rate = ttsSettings.rate;     // 読み上げ速度
+    utterance.pitch = ttsSettings.pitch;   // 音の高さ
+    utterance.volume = ttsSettings.volume; // 音量
+
+    // イベントリスナー
+    utterance.onstart = () => {
+      setIsSpeaking(true);
+    };
+
+    utterance.onend = () => {
+      setIsSpeaking(false);
+    };
+
+    utterance.onerror = (event) => {
+      console.error('TTS Error:', event);
+      setIsSpeaking(false);
+    };
+
+    speechInstance.speak(utterance);
+  };
+
+  // TTS停止
+  const stopSpeaking = () => {
+    if (speechInstance) {
+      speechInstance.cancel();
+      setIsSpeaking(false);
+    }
+  };
+
+  // TTS切り替え
+  const toggleTTS = () => {
+    setIsTTSEnabled(!isTTSEnabled);
+    if (isSpeaking) {
+      stopSpeaking();
+    }
+  };
 
   // オペレータ発信ボタンの種類
   const operatorButtons = [
@@ -105,6 +173,7 @@ export default function PaaSPage() {
     const decoder = new TextDecoder('utf-8');
     let buffer = '';
     let done = false;
+    let completeMessage = ''; // 完全なメッセージを蓄積
 
     try {
       while (!done) {
@@ -131,6 +200,7 @@ export default function PaaSPage() {
 
                 // メッセージ更新 - Difyから受信したanswerをそのまま追加
                 if (data.answer !== undefined && data.answer !== '') {
+                  completeMessage += data.answer; // 完全なメッセージを蓄積
                   setChatMessages(prev =>
                     prev.map(msg =>
                       msg.id === botMessageId
@@ -153,6 +223,13 @@ export default function PaaSPage() {
     } finally {
       reader.releaseLock();
       console.log('🔚 Streaming completed');
+      
+      // ストリーミング完了後、自動読み上げが有効な場合は読み上げを開始
+      if (isTTSEnabled && completeMessage.trim()) {
+        setTimeout(() => {
+          speakText(completeMessage);
+        }, 500); // 少し待ってから読み上げ開始
+      }
     }
   };
 
@@ -455,13 +532,140 @@ export default function PaaSPage() {
         <div className="h-full max-h-screen flex flex-col">
           {/* チャットヘッダー */}
           <div className="bg-blue-600 text-white p-4 rounded-t-lg flex-shrink-0">
-            <h2 className="text-xl font-bold flex items-center">
-              Dify AI アシスタント
-            </h2>
-            <p className="text-blue-100 text-sm mt-1">
-              ロードサービス初回対応システム
-            </p>
+            <div className="flex justify-between items-center">
+              <div>
+                <h2 className="text-xl font-bold flex items-center">
+                  Dify AI アシスタント
+                </h2>
+                <p className="text-blue-100 text-sm mt-1">
+                  ロードサービス初回対応システム
+                </p>
+              </div>
+              
+              {/* TTS設定コントロール */}
+              <div className="flex items-center space-x-2">
+                <button
+                  onClick={toggleTTS}
+                  className={`px-3 py-1 rounded-full text-xs font-medium transition-all duration-200 ${
+                    isTTSEnabled 
+                      ? 'bg-green-500 hover:bg-green-600 text-white' 
+                      : 'bg-gray-500 hover:bg-gray-600 text-white'
+                  }`}
+                  title={isTTSEnabled ? '自動読み上げON' : '自動読み上げOFF'}
+                >
+                  🔊 {isTTSEnabled ? 'ON' : 'OFF'}
+                </button>
+                
+                <button
+                  onClick={() => setShowTTSSettings(!showTTSSettings)}
+                  className="px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white rounded-full text-xs font-medium transition-all duration-200"
+                  title="音声設定"
+                >
+                  ⚙️ 設定
+                </button>
+                
+                {isSpeaking && (
+                  <button
+                    onClick={stopSpeaking}
+                    className="px-3 py-1 bg-red-500 hover:bg-red-600 text-white rounded-full text-xs font-medium transition-all duration-200"
+                    title="読み上げ停止"
+                  >
+                    ⏹️ 停止
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
+
+          {/* TTS設定パネル */}
+          {showTTSSettings && (
+            <div className="bg-white border-b border-gray-200 p-4 flex-shrink-0">
+              <div className="space-y-4">
+                <h3 className="text-lg font-semibold text-gray-800 mb-3">🔊 音声読み上げ設定</h3>
+                
+                {/* 読み上げ速度 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    読み上げ速度: {ttsSettings.rate}x
+                  </label>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="5.0"
+                    step="0.1"
+                    value={ttsSettings.rate}
+                    onChange={(e) => setTtsSettings(prev => ({ ...prev, rate: parseFloat(e.target.value) }))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>遅い (0.1x)</span>
+                    <span>標準 (3.5x)</span>
+                    <span>超高速 (5.0x)</span>
+                  </div>
+                </div>
+
+                {/* 音の高さ */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    音の高さ: {ttsSettings.pitch}
+                  </label>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="2.0"
+                    step="0.1"
+                    value={ttsSettings.pitch}
+                    onChange={(e) => setTtsSettings(prev => ({ ...prev, pitch: parseFloat(e.target.value) }))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>低い (0.1)</span>
+                    <span>標準 (1.0)</span>
+                    <span>高い (2.0)</span>
+                  </div>
+                </div>
+
+                {/* 音量 */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">
+                    音量: {Math.round(ttsSettings.volume * 100)}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0.1"
+                    max="1.0"
+                    step="0.1"
+                    value={ttsSettings.volume}
+                    onChange={(e) => setTtsSettings(prev => ({ ...prev, volume: parseFloat(e.target.value) }))}
+                    className="w-full h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer slider"
+                  />
+                  <div className="flex justify-between text-xs text-gray-500 mt-1">
+                    <span>10%</span>
+                    <span>50%</span>
+                    <span>100%</span>
+                  </div>
+                </div>
+
+                {/* テスト読み上げボタン */}
+                <div className="flex space-x-2 pt-2">
+                  <button
+                    onClick={() => speakText('これは音声設定のテストです。この設定で読み上げします。')}
+                    disabled={isSpeaking}
+                    className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white rounded-lg text-sm font-medium transition-all duration-200"
+                  >
+                    🎵 テスト読み上げ
+                  </button>
+                  
+                  <button
+                    onClick={() => setTtsSettings({ rate: 3.5, pitch: 1.0, volume: 0.8 })}
+                    className="px-4 py-2 bg-gray-500 hover:bg-gray-600 text-white rounded-lg text-sm font-medium transition-all duration-200"
+                  >
+                    🔄 デフォルトに戻す
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
           {/* チャットメッセージエリア */}
           <div className="flex-1 overflow-y-auto p-4 bg-gray-50 space-y-4 min-h-0">
@@ -478,13 +682,31 @@ export default function PaaSPage() {
                   }`}
                 >
                   <p className="text-sm whitespace-pre-wrap">{message.content}</p>
-                  <p
-                    className={`text-xs mt-1 ${
-                      message.isUser ? 'text-blue-100' : 'text-gray-500'
-                    }`}
-                  >
-                    {message.timestamp.toLocaleTimeString()}
-                  </p>
+                  
+                  {/* タイムスタンプとTTSボタン */}
+                  <div className={`flex items-center justify-between mt-1 ${
+                    message.isUser ? 'text-blue-100' : 'text-gray-500'
+                  }`}>
+                    <p className="text-xs">
+                      {message.timestamp.toLocaleTimeString()}
+                    </p>
+                    
+                    {/* AIメッセージの場合、読み上げボタンを表示 */}
+                    {!message.isUser && message.content.trim() && (
+                      <button
+                        onClick={() => speakText(message.content)}
+                        disabled={isSpeaking}
+                        className={`ml-2 px-2 py-1 rounded text-xs transition-all duration-200 ${
+                          isSpeaking 
+                            ? 'bg-gray-300 text-gray-500 cursor-not-allowed' 
+                            : 'bg-blue-100 hover:bg-blue-200 text-blue-600 hover:text-blue-800'
+                        }`}
+                        title="このメッセージを読み上げ"
+                      >
+                        🔊
+                      </button>
+                    )}
+                  </div>
                 </div>
               </div>
             ))}
@@ -499,6 +721,22 @@ export default function PaaSPage() {
                       <div className="w-2 h-2 bg-blue-500 rounded-full animate-bounce" style={{ animationDelay: '0.2s' }}></div>
                     </div>
                     <span className="text-sm text-gray-600">AIが応答中...</span>
+                  </div>
+                </div>
+              </div>
+            )}
+            
+            {/* 読み上げ中の表示 */}
+            {isSpeaking && !isLoading && (
+              <div className="flex justify-start">
+                <div className="bg-green-100 text-green-800 shadow-md max-w-xs lg:max-w-md px-4 py-2 rounded-lg border-l-4 border-green-500">
+                  <div className="flex items-center space-x-2">
+                    <div className="flex space-x-1">
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></div>
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" style={{ animationDelay: '0.2s' }}></div>
+                      <div className="w-2 h-2 bg-green-500 rounded-full animate-pulse" style={{ animationDelay: '0.4s' }}></div>
+                    </div>
+                    <span className="text-sm font-medium">🔊 読み上げ中...</span>
                   </div>
                 </div>
               </div>
