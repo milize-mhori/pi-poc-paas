@@ -3,6 +3,76 @@
 import { useState, useRef, useEffect } from 'react';
 import ReceptionNumberSelector from '@/components/ReceptionNumberSelector';
 
+// Web Speech API の型定義
+declare global {
+  interface Window {
+    SpeechRecognition: typeof SpeechRecognition;
+    webkitSpeechRecognition: typeof SpeechRecognition;
+  }
+}
+
+interface SpeechRecognition extends EventTarget {
+  continuous: boolean;
+  grammars: SpeechGrammarList;
+  interimResults: boolean;
+  lang: string;
+  maxAlternatives: number;
+  serviceURI: string;
+  start(): void;
+  stop(): void;
+  abort(): void;
+  onerror: (event: SpeechRecognitionErrorEvent) => void;
+  onresult: (event: SpeechRecognitionEvent) => void;
+  onstart: () => void;
+  onend: () => void;
+}
+
+interface SpeechRecognitionEvent extends Event {
+  resultIndex: number;
+  results: SpeechRecognitionResultList;
+}
+
+interface SpeechRecognitionErrorEvent extends Event {
+  error: string;
+  message: string;
+}
+
+interface SpeechRecognitionResultList {
+  readonly length: number;
+  item(index: number): SpeechRecognitionResult;
+  [index: number]: SpeechRecognitionResult;
+}
+
+interface SpeechRecognitionResult {
+  readonly length: number;
+  isFinal: boolean;
+  item(index: number): SpeechRecognitionAlternative;
+  [index: number]: SpeechRecognitionAlternative;
+}
+
+interface SpeechRecognitionAlternative {
+  transcript: string;
+  confidence: number;
+}
+
+interface SpeechGrammarList {
+  readonly length: number;
+  item(index: number): SpeechGrammar;
+  [index: number]: SpeechGrammar;
+  addFromURI(src: string, weight?: number): void;
+  addFromString(string: string, weight?: number): void;
+}
+
+interface SpeechGrammar {
+  src: string;
+  weight: number;
+}
+
+declare var SpeechRecognition: {
+  prototype: SpeechRecognition;
+  new(): SpeechRecognition;
+};
+
 interface ChatMessage {
   id: string;
   content: string;
@@ -30,6 +100,9 @@ export default function PaaSPage() {
   // Difyの入力フィールド
   const [receptionNumberInput, setReceptionNumberInput] = useState('');
   const [classificationInput, setClassificationInput] = useState('');
+  
+  // 分類を確実に保持するためのRef
+  const lastClassificationRef = useRef<string>('');
   
   // 会話状態管理
   const [isChatActive, setIsChatActive] = useState(false);
@@ -77,10 +150,36 @@ export default function PaaSPage() {
 
   // TTS機能：テキストを音声で読み上げ
   const speakText = (text: string) => {
-    if (!speechInstance || !text.trim()) return;
+    console.log('🎵 speakText called:', { 
+      text: text.substring(0, 100) + '...', 
+      textLength: text.length,
+      speechInstance: !!speechInstance, 
+      isTTSEnabled,
+      isSpeaking,
+      windowSpeechSynthesis: !!(typeof window !== 'undefined' && window.speechSynthesis)
+    });
+    
+    // speechInstanceが無効になっている場合は直接window.speechSynthesisを使用
+    let activeSpeechSynthesis = speechInstance;
+    if (!activeSpeechSynthesis && typeof window !== 'undefined' && window.speechSynthesis) {
+      console.log('🔄 speechInstance が無効、window.speechSynthesis を直接使用');
+      activeSpeechSynthesis = window.speechSynthesis;
+      setSpeechInstance(window.speechSynthesis); // 状態も更新
+    }
+    
+    if (!activeSpeechSynthesis || !text.trim()) {
+      console.log('🔇 speakText early return:', { 
+        speechInstance: !!speechInstance,
+        activeSpeechSynthesis: !!activeSpeechSynthesis,
+        hasText: !!text.trim(),
+        windowSpeechSynthesis: !!(typeof window !== 'undefined' && window.speechSynthesis)
+      });
+      return;
+    }
 
     // 既に読み上げ中の場合は停止
-    speechInstance.cancel();
+    console.log('🛑 Cancelling previous speech');
+    activeSpeechSynthesis.cancel();
 
     const utterance = new SpeechSynthesisUtterance(text);
     
@@ -92,19 +191,22 @@ export default function PaaSPage() {
 
     // イベントリスナー
     utterance.onstart = () => {
+      console.log('🎵 TTS開始');
       setIsSpeaking(true);
     };
 
     utterance.onend = () => {
+      console.log('🎵 TTS終了');
       setIsSpeaking(false);
     };
 
     utterance.onerror = (event) => {
-      console.error('TTS Error:', event);
+      console.error('🚨 TTS Error:', event);
       setIsSpeaking(false);
     };
 
-    speechInstance.speak(utterance);
+    console.log('🎵 activeSpeechSynthesis.speak() 実行');
+    activeSpeechSynthesis.speak(utterance);
   };
 
   // TTS停止
@@ -120,6 +222,157 @@ export default function PaaSPage() {
     setIsTTSEnabled(!isTTSEnabled);
     if (isSpeaking) {
       stopSpeaking();
+    }
+  };
+
+  // 音声入力関連のstate
+  const [isVoiceRecording, setIsVoiceRecording] = useState(false);
+  const [voiceError, setVoiceError] = useState<string | null>(null);
+  const recognitionRef = useRef<SpeechRecognition | null>(null);
+  const [isVoiceSupported, setIsVoiceSupported] = useState(false);
+  const lastTranscriptRef = useRef<string>('');
+  const hasSentVoiceMessage = useRef<boolean>(false);
+
+  // Web Speech API の初期化
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (SpeechRecognition) {
+        setIsVoiceSupported(true);
+        recognitionRef.current = new SpeechRecognition();
+        
+        // 日本語設定
+        recognitionRef.current.lang = 'ja-JP';
+        recognitionRef.current.continuous = false;
+        recognitionRef.current.interimResults = true;
+        recognitionRef.current.maxAlternatives = 1;
+        
+        // 音声認識結果のイベントハンドラ
+        recognitionRef.current.onresult = (event) => {
+          let finalTranscript = '';
+          let interimTranscript = '';
+          
+          for (let i = event.resultIndex; i < event.results.length; i++) {
+            const transcript = event.results[i][0].transcript;
+            if (event.results[i].isFinal) {
+              finalTranscript += transcript;
+            } else {
+              interimTranscript += transcript;
+            }
+          }
+          
+          // 最新の認識結果を保存
+          const currentTranscript = finalTranscript || interimTranscript;
+          if (currentTranscript) {
+            lastTranscriptRef.current = currentTranscript.trim();
+            setInputMessage(lastTranscriptRef.current);
+            console.log('🎤 音声認識中:', currentTranscript, 'isFinal:', !!finalTranscript);
+          }
+          
+          // 確定した結果があれば即座に送信（音声入力の場合はチャットを自動でアクティブ化）
+          if (finalTranscript && finalTranscript.trim() && !hasSentVoiceMessage.current) {
+            console.log('🎤 確定結果で自動送信:', finalTranscript.trim(), 'isChatActive:', isChatActive);
+            hasSentVoiceMessage.current = true;
+            
+            // チャットがアクティブでない場合は自動でアクティブ化
+            if (!isChatActive) {
+              setIsChatActive(true);
+            }
+            
+            setTimeout(() => {
+              sendMessageWithText(finalTranscript.trim());
+            }, 300);
+          }
+        };
+
+        recognitionRef.current.onerror = (event) => {
+          console.error('🎤 音声認識エラー:', event.error);
+          setIsVoiceRecording(false);
+          
+          let errorMessage = '音声認識エラーが発生しました';
+          switch (event.error) {
+            case 'no-speech':
+              errorMessage = '音声が検出されませんでした。もう一度お試しください。';
+              break;
+            case 'audio-capture':
+              errorMessage = 'マイクにアクセスできません。マイクの接続を確認してください。';
+              break;
+            case 'not-allowed':
+              errorMessage = 'マイクのアクセスが許可されていません。ブラウザの設定を確認してください。';
+              break;
+            case 'network':
+              errorMessage = 'ネットワークエラーが発生しました。';
+              break;
+            case 'language-not-supported':
+              errorMessage = '日本語音声認識がサポートされていません。';
+              break;
+            default:
+              errorMessage = `音声認識エラー: ${event.error}`;
+          }
+          setVoiceError(errorMessage);
+        };
+
+        recognitionRef.current.onstart = () => {
+          console.log('🎤 音声認識開始 - isChatActive:', isChatActive);
+          setVoiceError(null);
+        };
+
+        recognitionRef.current.onend = () => {
+          console.log('🎤 音声認識終了');
+          setIsVoiceRecording(false);
+          
+          // onendでも最後の認識結果があれば送信（isFinalが発火しない場合のフォールバック）
+          if (lastTranscriptRef.current && !isLoading && !hasSentVoiceMessage.current) {
+            console.log('🎤 onend時の自動送信:', lastTranscriptRef.current, 'isChatActive:', isChatActive);
+            hasSentVoiceMessage.current = true;
+            
+            // チャットがアクティブでない場合は自動でアクティブ化
+            if (!isChatActive) {
+              setIsChatActive(true);
+            }
+            
+            setTimeout(() => {
+              sendMessageWithText(lastTranscriptRef.current);
+            }, 100);
+          }
+        };
+      } else {
+        setIsVoiceSupported(false);
+        setVoiceError('このブラウザは音声認識をサポートしていません。Chrome、Edge、Safari等をお使いください。');
+      }
+    }
+  }, []);
+
+  // 音声録音開始（プレス&ホールド）
+  const startVoiceRecording = () => {
+    if (!isVoiceSupported || !recognitionRef.current) {
+      setVoiceError('音声認識が利用できません');
+      return;
+    }
+    
+    try {
+      setVoiceError(null);
+      lastTranscriptRef.current = ''; // 前回の結果をクリア
+      hasSentVoiceMessage.current = false; // 送信フラグをリセット
+      setInputMessage(''); // 入力フィールドもクリア
+      setIsVoiceRecording(true);
+      recognitionRef.current.start();
+    } catch (err) {
+      const errorMessage = err instanceof Error ? err.message : "Unknown error";
+      setVoiceError(`音声認識開始エラー: ${errorMessage}`);
+      setIsVoiceRecording(false);
+    }
+  };
+
+  // 音声録音停止
+  const stopVoiceRecording = () => {
+    if (recognitionRef.current && isVoiceRecording) {
+      try {
+        recognitionRef.current.stop();
+      } catch (err) {
+        console.error('音声認識停止エラー:', err);
+        setIsVoiceRecording(false);
+      }
     }
   };
 
@@ -225,26 +478,46 @@ export default function PaaSPage() {
       console.log('🔚 Streaming completed');
       
       // ストリーミング完了後、自動読み上げが有効な場合は読み上げを開始
+      console.log('🔚 TTS判定:', { 
+        isTTSEnabled, 
+        completeMessageLength: completeMessage.length,
+        completeMessageSample: completeMessage.substring(0, 100),
+        willSpeak: isTTSEnabled && completeMessage.trim()
+      });
+      
       if (isTTSEnabled && completeMessage.trim()) {
+        console.log('🎵 TTS開始予定:', completeMessage.substring(0, 50) + '...');
         setTimeout(() => {
           speakText(completeMessage);
         }, 500); // 少し待ってから読み上げ開始
+      } else {
+        console.log('🔇 TTS スキップ:', { isTTSEnabled, hasMessage: !!completeMessage.trim() });
       }
     }
   };
 
-  // Difyチャット送信
-  const sendMessage = async () => {
-    if (!inputMessage.trim() || isLoading) return;
+  // 音声認識用の送信関数
+  const sendMessageWithText = async (messageText: string) => {
+    console.log('📤 sendMessageWithText called:', { messageText, isLoading, isChatActive });
+    if (!messageText.trim() || isLoading) {
+      console.log('📤 送信条件未満:', { text: messageText.trim(), isLoading });
+      return;
+    }
+
+    // チャットをアクティブ化（音声入力時）
+    if (!isChatActive) {
+      console.log('📤 チャットをアクティブ化');
+      setIsChatActive(true);
+    }
 
     const userMessage: ChatMessage = {
       id: Date.now().toString(),
-      content: inputMessage,
+      content: messageText,
       isUser: true,
       timestamp: new Date(),
     };
     setChatMessages(prev => [...prev, userMessage]);
-    setInputMessage('');
+    setInputMessage(''); // 入力フィールドをクリア
     setIsLoading(true);
 
     // ボット用空メッセージ
@@ -257,26 +530,77 @@ export default function PaaSPage() {
     };
     setChatMessages(prev => [...prev, botMessage]);
 
-    const validClassification = classificationOptions.includes(classificationInput) ? classificationInput : '';
+    // 音声入力時も最後に押されたボタンの分類を保持
+    // stateとRefの両方をチェックして、より確実に分類を取得
+    const currentClassification = classificationInput || lastClassificationRef.current;
+    const validClassification = classificationOptions.includes(currentClassification) ? currentClassification : '';
+    
+    console.log('🔍 音声入力時の分類チェック:', {
+      classificationInput,
+      lastClassificationRef: lastClassificationRef.current,
+      currentClassification,
+      validClassification,
+      classificationOptions,
+      includes: classificationOptions.includes(currentClassification)
+    });
+    
+    // 分類が設定されていない場合はエラーメッセージを表示
+    if (!validClassification) {
+      console.log('❌ 分類が無効:', { 
+        classificationInput, 
+        lastClassificationRef: lastClassificationRef.current,
+        currentClassification,
+        validClassification 
+      });
+      const errorMessage: ChatMessage = {
+        id: botMessageId,
+        content: `⚠️ 音声入力をする前に、左側のオペレーター発信ボタンを押して分類を選択してください。\nState分類: "${classificationInput}"\nRef分類: "${lastClassificationRef.current}"`,
+        isUser: false,
+        timestamp: new Date(),
+      };
+      setChatMessages(prev => prev.map(msg => msg.id === botMessageId ? errorMessage : msg));
+      setIsLoading(false);
+      return;
+    }
+    
     const inputs = {
       reception_number: receptionNumberInput || receptionInfo.receptionNumber,
       classification: validClassification,
     };
 
     try {
+      console.log('📤 Dify API送信:', { 
+        message: messageText, 
+        conversation_id: conversationId, 
+        inputs,
+        receptionNumberInput,
+        classificationInput,
+        validClassification,
+        classificationOptions,
+        receptionInfo 
+      });
+      
       const response = await fetch('/api/dify-chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: inputMessage, conversation_id: conversationId, inputs }),
+        body: JSON.stringify({ message: messageText, conversation_id: conversationId, inputs }),
       });
-      if (!response.ok) throw new Error(`API error: ${response.status}`);
+      
+      console.log('📤 Dify API response:', { status: response.status, ok: response.ok });
+      
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error('📤 Dify API error response:', errorText);
+        throw new Error(`API error: ${response.status} - ${errorText}`);
+      }
+      
       // SSEストリーム処理
       await processStreamingResponse(response, botMessageId);
     } catch (error) {
-      console.error('Chat error:', error);
+      console.error('📤 Chat error details:', error);
       const errorMessage: ChatMessage = {
         id: botMessageId,
-        content: 'メッセージの送信に失敗しました。',
+        content: `メッセージの送信に失敗しました。${error instanceof Error ? error.message : ''}`,
         isUser: false,
         timestamp: new Date(),
       };
@@ -284,6 +608,13 @@ export default function PaaSPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  // Difyチャット送信（テキスト入力用）
+  const sendMessage = async () => {
+    if (!inputMessage.trim() || isLoading) return;
+    
+    await sendMessageWithText(inputMessage);
   };
 
   // エンターキーでメッセージ送信
@@ -353,6 +684,8 @@ export default function PaaSPage() {
       .trim(); // 前後のスペースを除去
     
     setClassificationInput(sanitizedClassification);
+    lastClassificationRef.current = sanitizedClassification; // Refにも保存
+    console.log('✅ 分類を設定しました:', sanitizedClassification);
 
     // Difyの入力フィールドの値を設定
     const inputs = {
@@ -746,6 +1079,13 @@ export default function PaaSPage() {
 
           {/* チャット入力エリア */}
           <div className="border-t bg-white p-4 flex-shrink-0">
+            {/* 音声エラー表示 */}
+            {voiceError && (
+              <div className="bg-red-100 border border-red-400 text-red-700 px-4 py-2 rounded mb-2 text-sm">
+                <strong>音声エラー:</strong> {voiceError}
+              </div>
+            )}
+            
             <div className="flex space-x-2 mb-2">
               <input
                 type="text"
@@ -756,6 +1096,33 @@ export default function PaaSPage() {
                 className="flex-1 border border-gray-300 rounded-lg px-4 py-2 focus:outline-none focus:border-blue-500 disabled:bg-gray-100 disabled:text-gray-400"
                 disabled={isLoading || !isChatActive}
               />
+              
+              {/* 音声入力ボタン（プレス&ホールド） */}
+              <button
+                onMouseDown={startVoiceRecording}
+                onMouseUp={stopVoiceRecording}
+                onMouseLeave={stopVoiceRecording}
+                onTouchStart={startVoiceRecording}
+                onTouchEnd={stopVoiceRecording}
+                disabled={isLoading || !isVoiceSupported}
+                className={`px-4 py-2 rounded-lg font-medium transition duration-200 ${
+                  !isVoiceSupported
+                    ? "bg-gray-300 text-gray-500 cursor-not-allowed"
+                    : isVoiceRecording 
+                      ? "bg-red-500 hover:bg-red-600 text-white animate-pulse" 
+                      : "bg-green-500 hover:bg-green-600 text-white disabled:bg-gray-400"
+                }`}
+                title={
+                  !isVoiceSupported 
+                    ? "音声認識はサポートされていません" 
+                    : isVoiceRecording 
+                      ? "録音中... ボタンを離すと音声認識→自動送信" 
+                      : "長押しで音声入力→自動送信（ブラウザSTT）"
+                }
+              >
+                {isVoiceRecording ? "🔴" : "🎤"}
+              </button>
+              
               <button
                 onClick={sendMessage}
                 disabled={isLoading || !inputMessage.trim() || !isChatActive}
@@ -765,7 +1132,9 @@ export default function PaaSPage() {
               </button>
             </div>
             <div className="flex justify-between text-xs text-gray-500">
-              <span>ボタン：新しい会話開始 | 入力：現在の会話継続</span>
+              <span>
+                ボタン：新しい会話開始 | 入力：現在の会話継続 | 🎤：長押し音声入力→自動送信
+              </span>
               <button
                 onClick={() => {
                   setChatMessages([]);
