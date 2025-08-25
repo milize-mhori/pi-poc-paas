@@ -28,11 +28,11 @@ export async function GET(request: NextRequest) {
     const autoTTS = url.searchParams.get('autoTTS') !== 'false';
     const vocabularyName = url.searchParams.get('vocabularyName') || process.env.AWS_TRANSCRIBE_VOCABULARY_NAME || 'roadservice';
     
-    let streamController: ReadableStreamDefaultController | null = null;
+    // streamController変数を削除（使用されていないため）
     
     const stream = new ReadableStream({
       start(controller) {
-        streamController = controller;
+        // streamController変数は削除されたため、直接controllerを使用
         
         console.log(`➕ Real-time session ${sessionId} started`);
         
@@ -148,9 +148,15 @@ async function startTranscribeStream(sessionId: string, voiceId: string, autoTTS
     console.log('🚀 Starting AWS Transcribe stream for session:', sessionId);
     
     // StartStreamTranscriptionCommandのパラメータを構築
-    const commandParams: any = {
-      LanguageCode: "ja-JP",
-      MediaEncoding: "pcm",
+    const commandParams: {
+      LanguageCode: "ja-JP";
+      MediaEncoding: "pcm";
+      MediaSampleRateHertz: number;
+      AudioStream: AsyncGenerator<AudioStream>;
+      VocabularyName?: string;
+    } = {
+      LanguageCode: "ja-JP" as const,
+      MediaEncoding: "pcm" as const,
       MediaSampleRateHertz: 16000,
       AudioStream: (async function* (): AsyncGenerator<AudioStream> {
         // 音声ストリームからデータを読み取り
@@ -172,7 +178,7 @@ async function startTranscribeStream(sessionId: string, voiceId: string, autoTTS
     console.log('📨 Transcribe stream established');
     
     // 音声認識結果をリアルタイム処理
-    for await (const event of response.TranscriptResultStream as AsyncIterable<any>) {
+    for await (const event of response.TranscriptResultStream as AsyncIterable<{ TranscriptEvent?: { Transcript?: { Results?: Array<{ Alternatives?: Array<{ Transcript?: string }>; IsPartial?: boolean }> } } }>) {
       const results = event.TranscriptEvent?.Transcript?.Results;
       if (!results) continue;
       
@@ -342,7 +348,7 @@ async function processDifyChat(sessionId: string, message: string, voiceId: stri
                 }
                 break;
               }
-            } catch (parseError) {
+            } catch {
               console.warn('⚠️ Failed to parse Dify response:', line);
             }
           }
@@ -399,7 +405,7 @@ async function generateTTS(text: string, voiceId: string): Promise<string | null
 }
 
 // クライアントにデータ送信
-function sendToClient(sessionId: string, data: any) {
+function sendToClient(sessionId: string, data: Record<string, unknown>) {
   const session = activeSessions.get(sessionId);
   if (!session) return;
   

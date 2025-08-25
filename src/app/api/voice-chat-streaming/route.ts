@@ -151,7 +151,7 @@ export async function POST(request: NextRequest) {
                       controller.enqueue(encoder.encode(`data: ${JSON.stringify(endData)}\n\n`));
                       break;
                     }
-                  } catch (parseError) {
+                  } catch {
                     console.warn('⚠️ Failed to parse Dify response line:', line);
                   }
                 }

@@ -5,12 +5,7 @@ import {
   AudioStream,
 } from "@aws-sdk/client-transcribe-streaming";
 
-// リアルタイム転写セッションの管理
-const activeSessions = new Map<string, {
-  client: TranscribeStreamingClient;
-  audioStream: AsyncGenerator<AudioStream>;
-  controller: ReadableStreamDefaultController;
-}>();
+// activeSessions変数を削除（使用されていないため）
 
 export async function POST(request: NextRequest) {
   try {
@@ -70,8 +65,8 @@ export async function POST(request: NextRequest) {
     console.log('🔢 Audio divided into', chunks.length, 'chunks');
 
     const command = new StartStreamTranscriptionCommand({
-      LanguageCode: "ja-JP",
-      MediaEncoding: "pcm",
+      LanguageCode: "ja-JP" as const,
+      MediaEncoding: "pcm" as const,
       MediaSampleRateHertz: 16000,
       AudioStream: (async function* (): AsyncGenerator<AudioStream> {
         // リアルタイム用に短い間隔で送信
@@ -84,7 +79,12 @@ export async function POST(request: NextRequest) {
     });
 
     // Transcribeからの結果を収集（リアルタイム）
-    const results: any[] = [];
+    const results: Array<{
+      text: string;
+      isFinal: boolean;
+      timestamp: string;
+      sessionId: string;
+    }> = [];
     
     try {
       console.log('🚀 Sending chunk to Amazon Transcribe...');
@@ -92,7 +92,7 @@ export async function POST(request: NextRequest) {
       console.log('📨 Received response from Amazon Transcribe');
       
       console.log('🔄 Processing transcript result stream...');
-      for await (const event of response.TranscriptResultStream as AsyncIterable<any>) {
+      for await (const event of response.TranscriptResultStream as AsyncIterable<{ TranscriptEvent?: { Transcript?: { Results?: Array<{ Alternatives?: Array<{ Transcript?: string }>; IsPartial?: boolean }> } } }>) {
         console.log('📡 Received event from stream:', Object.keys(event));
         const transcriptResults = event.TranscriptEvent?.Transcript?.Results;
         if (transcriptResults && transcriptResults.length > 0) {
@@ -157,17 +157,23 @@ export async function POST(request: NextRequest) {
 // クライアントへの通知機能（SSE用のグローバルクライアント管理）
 const sseClients = new Set<ReadableStreamDefaultController>();
 
-export function addSSEClient(controller: ReadableStreamDefaultController) {
-  sseClients.add(controller);
-  console.log('➕ SSE client added, total:', sseClients.size);
-}
+// SSEクライアント管理関数（現在未使用ですが、将来の拡張のために保持）
+// function addSSEClient(controller: ReadableStreamDefaultController) {
+//   sseClients.add(controller);
+//   console.log('➕ SSE client added, total:', sseClients.size);
+// }
+// 
+// function removeSSEClient(controller: ReadableStreamDefaultController) {
+//   sseClients.delete(controller);
+//   console.log('➖ SSE client removed, total:', sseClients.size);
+// }
 
-export function removeSSEClient(controller: ReadableStreamDefaultController) {
-  sseClients.delete(controller);
-  console.log('➖ SSE client removed, total:', sseClients.size);
-}
-
-async function notifyClient(transcriptData: any) {
+async function notifyClient(transcriptData: {
+  text: string;
+  isFinal: boolean;
+  timestamp: string;
+  sessionId: string;
+}) {
   console.log('📢 NotifyClient called with:', transcriptData.text);
   console.log('📊 Active SSE clients:', sseClients.size);
   

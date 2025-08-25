@@ -349,7 +349,7 @@ export default function RealtimeVoiceRecorder() {
       const errorMessage = err instanceof Error ? err.message : "Unknown error";
       setError(`録音開始エラー: ${errorMessage}`);
     }
-  }, [startTranscriptionStream, sendAudioChunk]);
+  }, [startTranscriptionStream, sendAudioChunk, handleSilenceDetection]);
 
   const stopRealtimeRecording = useCallback(async () => {
     try {

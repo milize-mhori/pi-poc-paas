@@ -6,9 +6,14 @@ import ReceptionNumberSelector from '@/components/ReceptionNumberSelector';
 // Web Speech API の型定義
 declare global {
   interface Window {
-    SpeechRecognition: typeof SpeechRecognition;
-    webkitSpeechRecognition: typeof SpeechRecognition;
+    SpeechRecognition: SpeechRecognitionConstructor;
+    webkitSpeechRecognition: SpeechRecognitionConstructor;
   }
+}
+
+interface SpeechRecognitionConstructor {
+  prototype: SpeechRecognition;
+  new(): SpeechRecognition;
 }
 
 interface SpeechRecognition extends EventTarget {
@@ -68,10 +73,7 @@ interface SpeechGrammar {
   weight: number;
 }
 
-declare var SpeechRecognition: {
-  prototype: SpeechRecognition;
-  new(): SpeechRecognition;
-};
+// SpeechRecognitionConstructorは上部で定義済み
 
 interface ChatMessage {
   id: string;
@@ -341,7 +343,7 @@ export default function PaaSPage() {
         setVoiceError('このブラウザは音声認識をサポートしていません。Chrome、Edge、Safari等をお使いください。');
       }
     }
-  }, []);
+  }, [isChatActive, isLoading]);
 
   // 音声録音開始（プレス&ホールド）
   const startVoiceRecording = () => {

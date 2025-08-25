@@ -85,11 +85,16 @@ export async function POST(request: NextRequest) {
 }
 
 // ストリームをバッファに変換
-async function streamToBuffer(stream: any): Promise<Buffer> {
-  const chunks: any[] = [];
-  for await (const chunk of stream) {
-    chunks.push(chunk);
+async function streamToBuffer(stream: unknown): Promise<Buffer> {
+  const chunks: Uint8Array[] = [];
+  
+  // StreamingBlobPayloadOutputTypesをAsyncIterableとして扱う
+  if (stream && typeof stream === 'object' && Symbol.asyncIterator in stream) {
+    for await (const chunk of stream as AsyncIterable<Uint8Array>) {
+      chunks.push(chunk);
+    }
   }
+  
   return Buffer.concat(chunks);
 }
 

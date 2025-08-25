@@ -1,8 +1,21 @@
-import { NextRequest } from "next/server";
-import { addSSEClient, removeSSEClient } from "../transcribe-realtime/route";
+// NextRequestは現在使用されていませんが、将来の拡張のためにコメントアウト
+// import { NextRequest } from "next/server";
+
+// SSEクライアント管理
+const sseClients = new Set<ReadableStreamDefaultController>();
+
+function addSSEClient(controller: ReadableStreamDefaultController) {
+  sseClients.add(controller);
+  console.log('➕ SSE client added, total:', sseClients.size);
+}
+
+function removeSSEClient(controller: ReadableStreamDefaultController) {
+  sseClients.delete(controller);
+  console.log('➖ SSE client removed, total:', sseClients.size);
+}
 
 // Server-Sent Events (SSE) ストリーム接続
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     console.log('🎯 SSE stream connection requested');
     

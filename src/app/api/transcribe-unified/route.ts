@@ -9,7 +9,7 @@ import {
 const sseClients = new Map<string, ReadableStreamDefaultController>();
 
 // SSE接続の処理
-export async function GET(request: NextRequest) {
+export async function GET() {
   try {
     console.log('🎯 SSE connection requested');
     
@@ -117,8 +117,8 @@ export async function POST(request: NextRequest) {
     console.log('🔢 Audio divided into', chunks.length, 'chunks');
 
     const command = new StartStreamTranscriptionCommand({
-      LanguageCode: "ja-JP",
-      MediaEncoding: "pcm",
+      LanguageCode: "ja-JP" as const,
+      MediaEncoding: "pcm" as const,
       MediaSampleRateHertz: 16000,
       AudioStream: (async function* (): AsyncGenerator<AudioStream> {
         // リアルタイム用に短い間隔で送信
@@ -131,7 +131,12 @@ export async function POST(request: NextRequest) {
     });
 
     // Transcribeからの結果を収集（リアルタイム）
-    const results: any[] = [];
+    const results: Array<{
+      text: string;
+      isFinal: boolean;
+      timestamp: string;
+      sessionId: string;
+    }> = [];
     
     try {
       console.log('🚀 Sending chunk to Amazon Transcribe...');
@@ -139,7 +144,7 @@ export async function POST(request: NextRequest) {
       console.log('📨 Received response from Amazon Transcribe');
       
       console.log('🔄 Processing transcript result stream...');
-      for await (const event of response.TranscriptResultStream as AsyncIterable<any>) {
+      for await (const event of response.TranscriptResultStream as AsyncIterable<{ TranscriptEvent?: { Transcript?: { Results?: Array<{ Alternatives?: Array<{ Transcript?: string }>; IsPartial?: boolean }> } } }>) {
         console.log('📡 Received event from stream:', Object.keys(event));
         const transcriptResults = event.TranscriptEvent?.Transcript?.Results;
         if (transcriptResults && transcriptResults.length > 0) {
@@ -202,7 +207,12 @@ export async function POST(request: NextRequest) {
 }
 
 // SSEクライアントへの通知機能
-async function notifySSEClients(transcriptData: any) {
+async function notifySSEClients(transcriptData: {
+  text: string;
+  isFinal: boolean;
+  timestamp: string;
+  sessionId: string;
+}) {
   console.log('📢 Notifying SSE clients with:', transcriptData.text);
   console.log('📊 Active SSE clients:', sseClients.size);
   

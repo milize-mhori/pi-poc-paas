@@ -11,12 +11,12 @@ function sanitizeMessage(text: string): string {
 }
 
 // inputsオブジェクトのサニタイズ関数
-function sanitizeInputs(inputs: any): any {
+function sanitizeInputs(inputs: Record<string, unknown>): Record<string, unknown> {
   if (!inputs || typeof inputs !== 'object') {
     return inputs;
   }
   
-  const sanitizedInputs: any = {};
+  const sanitizedInputs: Record<string, unknown> = {};
   
   // Difyが期待する分類値のリスト
   const validClassifications = [
@@ -30,7 +30,7 @@ function sanitizeInputs(inputs: any): any {
   
   for (const [key, value] of Object.entries(inputs)) {
     if (typeof value === 'string') {
-      let sanitizedValue = sanitizeMessage(value);
+      const sanitizedValue = sanitizeMessage(value);
       
       // classificationフィールドの場合、有効な値かチェック
       if (key === 'classification' && sanitizedValue) {

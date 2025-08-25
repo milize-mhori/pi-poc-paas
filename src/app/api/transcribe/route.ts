@@ -3,7 +3,7 @@ import {
   StartStreamTranscriptionCommand,
   AudioStream,
 } from "@aws-sdk/client-transcribe-streaming";
-import { PassThrough } from "stream";
+// PassThroughインポートを削除（使用されていないため）
 import { NextRequest } from "next/server";
 
 export async function GET(request: NextRequest) {
@@ -81,8 +81,8 @@ export async function POST(request: NextRequest) {
     }
 
     const command = new StartStreamTranscriptionCommand({
-      LanguageCode: "ja-JP",
-      MediaEncoding: "pcm",
+      LanguageCode: "ja-JP" as const,
+      MediaEncoding: "pcm" as const,
       MediaSampleRateHertz: 16000,
       AudioStream: (async function* (): AsyncGenerator<AudioStream> {
         // 小さなチャンクを順次送信
@@ -95,14 +95,18 @@ export async function POST(request: NextRequest) {
     });
 
     // Transcribeからの結果を収集
-    const results: any[] = [];
+    const results: Array<{
+      text: string;
+      isFinal: boolean;
+      timestamp: string;
+    }> = [];
     
     try {
       console.log('🚀 Sending to Amazon Transcribe...');
       const response = await client.send(command);
       console.log('✅ Transcribe response received');
       
-      for await (const event of response.TranscriptResultStream as AsyncIterable<any>) {
+      for await (const event of response.TranscriptResultStream as AsyncIterable<{ TranscriptEvent?: { Transcript?: { Results?: Array<{ Alternatives?: Array<{ Transcript?: string }>; IsPartial?: boolean }> } } }>) {
         console.log('📨 Transcribe event received:', event);
         const transcriptResults = event.TranscriptEvent?.Transcript?.Results;
         if (transcriptResults) {

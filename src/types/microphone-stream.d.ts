@@ -27,7 +27,7 @@ declare module 'microphone-stream' {
     on(event: 'error', listener: (error: Error) => void): this;
     on(event: 'end', listener: () => void): this;
     on(event: 'close', listener: () => void): this;
-    on(event: string | symbol, listener: (...args: any[]) => void): this;
+    on(event: string | symbol, listener: (...args: unknown[]) => void): this;
   }
 
   export = MicrophoneStream;

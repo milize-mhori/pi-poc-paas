@@ -387,7 +387,7 @@ export default function StreamingVoiceRecorder() {
     return () => {
       cleanup();
     };
-  }, []);
+  }, [cleanup]);
 
   return (
     <div className="max-w-4xl mx-auto p-6">

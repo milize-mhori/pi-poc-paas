@@ -87,7 +87,7 @@ export default function ReceptionNumberSelector({
     if (isOpen && options.length === 0) {
       fetchOptions('', true);
     }
-  }, [isOpen]);
+  }, [fetchOptions, isOpen, options.length]);
 
   const handleSelect = (reception: PaaSData) => {
     onSelectionChange(reception);
