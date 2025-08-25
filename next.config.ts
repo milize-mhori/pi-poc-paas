@@ -1,6 +1,9 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
+  // トレイリングスラッシュを無効化
+  trailingSlash: false,
+  
   experimental: {
     // Server Actions を有効化
     serverActions: {
